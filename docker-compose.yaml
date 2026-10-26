@@ -1,0 +1,82 @@
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: ./dockerfiles/php
+      args:
+        uid: ${USER_ID}
+        username: ${USER_NAME}
+    restart: unless-stopped
+    container_name: ${PROJECT_LABEL}-web
+    working_dir: /var/www/html
+    command: sh -c "if [ ! -f vendor/autoload.php ]; then composer install --no-interaction --prefer-dist; fi && php-fpm"
+    volumes:
+      - ./:/var/www/html
+      - ${USER_COMPOSER_DIR}:${CONTAINER_COMPOSER_DIR}
+    user: ${USER_ID}:${USER_GID}
+    depends_on:
+      - mariadb
+
+  mariadb:
+    image: mariadb:11
+    restart: unless-stopped
+    container_name: ${PROJECT_LABEL}-mariadb
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes:
+      - mariadb:/var/lib/mysql
+    ports:
+      - "33060:3306"
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    container_name: ${PROJECT_LABEL}-nginx
+    volumes:
+      - ./:/var/www/html
+      - ./docker-compose/nginx:/etc/nginx/conf.d/
+    networks:
+      - default
+      - web
+    labels:
+      - "traefik.enable=${TRAEFIK_ENABLE}"
+      - "traefik.docker.network=${TRAEFIK_DOCKER_NETWORK}"
+      - "traefik.http.routers.${PROJECT_LABEL}.rule=Host(`${TRAEFIK_HOSTNAME}`)"
+      - "traefik.http.routers.${PROJECT_LABEL}.entrypoints=${TRAEFIK_ENTRYPOINTS}"
+      - "traefik.http.services.${PROJECT_LABEL}.loadbalancer.server.port=80"
+    depends_on:
+      - web
+
+  vite:
+    image: node:20
+    profiles:
+      - dev
+    container_name: ${PROJECT_LABEL}-vite
+    working_dir: /var/www/html
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port ${VITE_PORT}"
+    volumes:
+      - ./:/var/www/html
+    ports:
+      - "${VITE_PORT}:${VITE_PORT}"
+
+  mailhog:
+    image: mailhog/mailhog
+    restart: unless-stopped
+    container_name: ${PROJECT_LABEL}-mailhog
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+volumes:
+  mariadb:
+
+networks:
+  web:
+    external: true
+    name: ${TRAEFIK_DOCKER_NETWORK}
+  default:
+    name: ${PROJECT_LABEL}
